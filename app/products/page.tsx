@@ -1,33 +1,84 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-// Removed: import { List } from '@/components/ui/list'
+import { Product as GoogleSheetProduct } from '@/lib/googleSheets'
 
-interface Product {
-  id: number
-  name: string
-  price: number
-  description: string
-}
-
-interface CartItem extends Product {
+// Local interface for cart items
+interface CartItem extends GoogleSheetProduct {
   quantity: number
 }
 
 export default function ProductsPage() {
+  const [products, setProducts] = useState<GoogleSheetProduct[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock products data
-  const products: Product[] = [
-    { id: 1, name: "Laptop", price: 999.99, description: "High performance laptop" },
-    { id: 2, name: "Smartphone", price: 699.99, description: "Latest smartphone" },
-    { id: 3, name: "Headphones", price: 199.99, description: "Wireless headphones" },
-  ]
+  // Fetch products from API
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setLoading(true)
+        const response = await fetch('/api/products')
+        
+        if (!response.ok) {
+          throw new Error(`Error: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        setProducts(data.products)
+        setError(null)
+      } catch (err) {
+        console.error('Failed to fetch products:', err)
+        setError('Failed to load products. Please try again later.')
+        // Fallback to mock data if API fails
+        setProducts([
+          { 
+            id: '1', 
+            name: "Laptop", 
+            url: "#",
+            imageUrl1: "",
+            imageUrl2: "",
+            originalPrice: 1299.99,
+            price: 999.99, 
+            stockStatus: "In Stock",
+            description: "High performance laptop" 
+          },
+          { 
+            id: '2', 
+            name: "Smartphone", 
+            url: "#",
+            imageUrl1: "",
+            imageUrl2: "",
+            originalPrice: 799.99,
+            price: 699.99, 
+            stockStatus: "In Stock",
+            description: "Latest smartphone" 
+          },
+          { 
+            id: '3', 
+            name: "Headphones", 
+            url: "#",
+            imageUrl1: "",
+            imageUrl2: "",
+            originalPrice: 249.99,
+            price: 199.99, 
+            stockStatus: "Low Stock",
+            description: "Wireless headphones" 
+          },
+        ])
+      } finally {
+        setLoading(false)
+      }
+    }
 
-  const addToCart = (product: Product, quantity: number) => {
+    fetchProducts()
+  }, [])
+
+  const addToCart = (product: GoogleSheetProduct, quantity: number) => {
     setCart(prevCart => {
       const existingItem = prevCart.find(item => item.id === product.id)
       if (existingItem) {
@@ -53,6 +104,25 @@ export default function ProductsPage() {
     setCart([])
   }
 
+  if (loading) {
+    return (
+      <div className="container mx-auto p-4 text-center">
+        <p className="text-xl">Loading products...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Error!</strong>
+          <span className="block sm:inline"> {error}</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-2xl font-bold mb-6">Products</h1>
@@ -60,9 +130,30 @@ export default function ProductsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {products.map(product => (
           <Card key={product.id} className="p-4">
+            {product.imageUrl1 && (
+              <div className="mb-4">
+                <img 
+                  src={product.imageUrl1} 
+                  alt={product.name} 
+                  className="w-full h-48 object-cover rounded"
+                />
+              </div>
+            )}
             <h2 className="text-xl font-semibold">{product.name}</h2>
             <p className="text-gray-600">{product.description}</p>
-            <p className="text-lg font-bold mt-2">${product.price}</p>
+            <div className="mt-2">
+              {product.originalPrice > product.price ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 line-through">${product.originalPrice.toFixed(2)}</span>
+                  <span className="text-lg font-bold text-red-600">${product.price.toFixed(2)}</span>
+                </div>
+              ) : (
+                <p className="text-lg font-bold">${product.price.toFixed(2)}</p>
+              )}
+            </div>
+            <p className={`text-sm mt-1 ${product.stockStatus === 'In Stock' ? 'text-green-600' : 'text-orange-500'}`}>
+              {product.stockStatus}
+            </p>
             <div className="mt-4 flex gap-2">
               <Input
                 type="number"
@@ -92,13 +183,13 @@ export default function ProductsPage() {
           <p>Your cart is empty</p>
         ) : (
           <>
-            <ul className="space-y-2"> {/* Replaced List with ul */}
+            <ul className="space-y-2">
               {cart.map(item => (
-                <li key={item.id} className="border-b pb-2"> {/* Replaced List.Item with li and added basic styling */}
+                <li key={item.id} className="border-b pb-2">
                   {item.name} - Quantity: {item.quantity} - ${(item.price * item.quantity).toFixed(2)}
                 </li>
               ))}
-            </ul> {/* Replaced /List with /ul */}
+            </ul>
             <div className="mt-4">
               <p className="text-xl font-bold">
                 Total: ${cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
