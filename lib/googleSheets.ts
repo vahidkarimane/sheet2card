@@ -8,15 +8,15 @@ export interface Product {
 	url: string;
 	imageUrl1: string;
 	imageUrl2: string;
-	originalPrice: number;
-	price: number;
+	originalPrice: string;
+	price: string;
 	stockStatus: string;
 	description?: string;
 }
 
 // Configuration for Google Sheets API
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1iIbGhOmpyNSLK1WRZPK6dql0P5hg6gILWC8aJyVGcZE";
-const RANGE = "fillerProducts!A2:H"; // Using the fillerProducts sheet as shown in the screenshot
+const DEFAULT_SHEET = "fillerProducts";
 
 // Create auth client using the service account credentials
 const auth = new google.auth.GoogleAuth({
@@ -45,9 +45,9 @@ function convertRowToProduct(row: string[]): Product {
 }
 
 /**
- * Fetch products from Google Sheet
+ * Fetch all sheet names from the Google Sheet
  */
-export async function fetchProductsFromSheet(): Promise<Product[]> {
+export async function fetchSheetNames(): Promise<string[]> {
 	try {
 		// Create sheets client with auth
 		const sheets = google.sheets({
@@ -55,16 +55,45 @@ export async function fetchProductsFromSheet(): Promise<Product[]> {
 			auth: auth,
 		});
 
-		// Fetch data from the sheet
+		// Fetch spreadsheet metadata
+		const response = await sheets.spreadsheets.get({
+			spreadsheetId: SHEET_ID,
+		});
+
+		// Extract sheet names
+		const sheetNames =
+			response.data.sheets?.map((sheet) => sheet.properties?.title || "").filter((name) => name !== "") || [];
+
+		return sheetNames;
+	} catch (error) {
+		console.error("Error fetching sheet names:", error);
+		// Return mock data as fallback
+		return ["fillerProducts", "mesoProducts", "mesoGelProducts", "nakhProducts"];
+	}
+}
+
+/**
+ * Fetch products from a specific sheet
+ */
+export async function fetchProductsFromSheet(sheetName: string = DEFAULT_SHEET): Promise<Product[]> {
+	try {
+		// Create sheets client with auth
+		const sheets = google.sheets({
+			version: "v4",
+			auth: auth,
+		});
+
+		// Fetch data from the specified sheet
+		const range = `${sheetName}!A2:H`;
 		const response = await sheets.spreadsheets.values.get({
 			spreadsheetId: SHEET_ID,
-			range: RANGE,
+			range: range,
 		});
 
 		const rows = response.data.values;
 
 		if (!rows || rows.length === 0) {
-			console.log("No data found in the Google Sheet.");
+			console.log(`No data found in the sheet: ${sheetName}`);
 			return [];
 		}
 
