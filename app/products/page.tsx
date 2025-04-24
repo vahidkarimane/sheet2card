@@ -12,7 +12,7 @@ interface CartItem extends GoogleSheetProduct {
 }
 
 // Format price in Iranian Rial
-function formatIranianRial(price: string): string {
+function formatIranianRial(price: number): number {
 	// Format without decimal places and with thousand separators
 	return price;
 }
@@ -53,8 +53,8 @@ export default function ProductsPage() {
 					url: "#",
 					imageUrl1: "",
 					imageUrl2: "",
-					originalPrice: "1299.99",
-					price: "999.99",
+					originalPrice: 1299.99,
+					price: 999.99,
 					stockStatus: "In Stock",
 					description: "High performance laptop",
 				},
@@ -64,8 +64,8 @@ export default function ProductsPage() {
 					url: "#",
 					imageUrl1: "",
 					imageUrl2: "",
-					originalPrice: "799.99",
-					price: "699.99",
+					originalPrice: 799.99,
+					price: 699.99,
 					stockStatus: "In Stock",
 					description: "Latest smartphone",
 				},
@@ -75,8 +75,8 @@ export default function ProductsPage() {
 					url: "#",
 					imageUrl1: "",
 					imageUrl2: "",
-					originalPrice: "249.99",
-					price: "199.99",
+					originalPrice: 249.99,
+					price: 199.99,
 					stockStatus: "Low Stock",
 					description: "Wireless headphones",
 				},
@@ -208,12 +208,14 @@ export default function ProductsPage() {
 						<ul className='space-y-2'>
 							{cart.map((item) => (
 								<li key={item.id} className='border-b pb-2'>
-									{item.name} - Quantity: {item.quantity} -
+									{item.name} - Quantity: {item.quantity} - Total: {item.price * item.quantity}
 								</li>
 							))}
 						</ul>
 						<div className='mt-4'>
-							<p className='text-xl font-bold'>Total: ﷼</p>
+							<p className='text-xl font-bold'>
+								Total: {cart.reduce((total, item) => total + item.price * item.quantity, 0)} ﷼
+							</p>
 							<Button onClick={submitOrder} className='mt-4'>
 								Submit Order
 							</Button>

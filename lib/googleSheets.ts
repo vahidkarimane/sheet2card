@@ -8,8 +8,8 @@ export interface Product {
 	url: string;
 	imageUrl1: string;
 	imageUrl2: string;
-	originalPrice: string;
-	price: string;
+	originalPrice: number;
+	price: number;
 	stockStatus: string;
 	description?: string;
 }
@@ -37,8 +37,8 @@ function convertRowToProduct(row: string[]): Product {
 		url: row[2] || "", // ProductURL
 		imageUrl1: row[3] || "", // ImageURL1
 		imageUrl2: row[4] || "", // ImageURL2
-		originalPrice: parseFloat(row[5]) || 0, // OriginalPrice
-		price: parseFloat(row[6]) || 0, // CurrentPrice
+		originalPrice: parseInt(row[5]) || 0, // OriginalPrice
+		price: parseInt(row[6]) || 0, // CurrentPrice
 		stockStatus: row[7] || "", // StockStatus
 		description: row[1] ? `${row[1]}` : "", // Using product name as description
 	};
