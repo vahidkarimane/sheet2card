@@ -6,6 +6,21 @@ import {Card} from "@/components/ui/card";
 import {Input} from "@/components/ui/input";
 import {Product as GoogleSheetProduct} from "@/lib/googleSheets";
 
+// Function to normalize product data from Supabase to match GoogleSheetProduct interface
+function normalizeProduct(product: any): GoogleSheetProduct {
+	return {
+		id: product.id,
+		name: product.name,
+		url: product.url || "",
+		imageUrl1: product.imageurl1 || product.imageUrl1 || "", // Handle both column name formats
+		imageUrl2: product.imageurl2 || product.imageUrl2 || "", // Handle both column name formats
+		originalPrice: product.originalprice || product.originalPrice || 0, // Handle both column name formats
+		price: product.price || 0,
+		stockStatus: product.stockstatus || product.stockStatus || "Unknown", // Handle both column name formats
+		description: product.description || "",
+	};
+}
+
 // Local interface for cart items
 interface CartItem extends GoogleSheetProduct {
 	quantity: number;
@@ -25,11 +40,16 @@ export default function ProductsPage() {
 	const [sheetNames, setSheetNames] = useState<string[]>([]);
 	const [currentSheet, setCurrentSheet] = useState<string>("");
 
+	// State to track data source (Supabase or Google Sheets)
+	const [dataSource, setDataSource] = useState<string>("loading");
+
 	// Function to fetch products from API
 	const fetchProducts = async (sheetName?: string) => {
 		try {
 			setLoading(true);
-			const url = sheetName ? `/api/products?sheet=${encodeURIComponent(sheetName)}` : "/api/products";
+			const url = sheetName
+				? `/api/products-supabase?category=${encodeURIComponent(sheetName)}`
+				: "/api/products-supabase";
 
 			const response = await fetch(url);
 
@@ -38,9 +58,14 @@ export default function ProductsPage() {
 			}
 
 			const data = await response.json();
-			setProducts(data.products);
+
+			// Normalize products from Supabase to match GoogleSheetProduct interface
+			const normalizedProducts = data.products.map(normalizeProduct);
+
+			setProducts(normalizedProducts);
 			setSheetNames(data.sheetNames || []);
 			setCurrentSheet(data.currentSheet || "");
+			setDataSource(data.source || "supabase");
 			setError(null);
 		} catch (err) {
 			console.error("Failed to fetch products:", err);
@@ -136,7 +161,19 @@ export default function ProductsPage() {
 
 	return (
 		<div className='container mx-auto p-4'>
-			<h1 className='text-2xl font-bold mb-4'>Products</h1>
+			<div className='flex justify-between items-center mb-4'>
+				<h1 className='text-2xl font-bold'>Products</h1>
+				<div className='text-sm px-3 py-1 rounded-full bg-gray-100'>
+					Data source:{" "}
+					{dataSource === "supabase" ? (
+						<span className='text-green-600 font-medium'>Supabase</span>
+					) : dataSource === "google_sheets" ? (
+						<span className='text-blue-600 font-medium'>Google Sheets (Fallback)</span>
+					) : (
+						<span className='text-gray-600'>Loading...</span>
+					)}
+				</div>
+			</div>
 
 			{/* Category Tabs */}
 			<div className='flex overflow-x-auto mb-6 pb-2'>
