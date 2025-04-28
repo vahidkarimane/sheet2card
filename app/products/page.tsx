@@ -234,16 +234,40 @@ export default function ProductsPage() {
 		});
 	};
 
-	const submitOrder = () => {
+	const submitOrder = async () => {
 		if (cart.length === 0) {
 			alert("Your cart is empty!");
 			return;
 		}
 
-		// Here you would typically make an API call to submit the order
-		console.log("Order submitted:", cart);
-		alert("Order submitted successfully!");
-		setCart([]);
+		try {
+			// Calculate total
+			const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+			// Send order to Telegram
+			const response = await fetch("/api/telegram", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({cart, total}),
+			});
+
+			const result = await response.json();
+
+			if (result.success) {
+				console.log("Order submitted:", cart);
+				alert("Order submitted successfully!");
+				setCart([]);
+			} else {
+				console.error("Failed to send order notification:", result.error);
+				alert("Order submitted, but notification failed to send.");
+				setCart([]);
+			}
+		} catch (error) {
+			console.error("Error submitting order:", error);
+			alert("Error submitting order. Please try again.");
+		}
 	};
 
 	if (loading) {
