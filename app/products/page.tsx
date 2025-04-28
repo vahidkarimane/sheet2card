@@ -5,6 +5,7 @@ import {Button} from "@/components/ui/button";
 import {Card} from "@/components/ui/card";
 import {Input} from "@/components/ui/input";
 import {Product as GoogleSheetProduct} from "@/lib/googleSheets";
+import {useUser} from "@clerk/nextjs";
 
 // Function to normalize product data from Supabase to match GoogleSheetProduct interface
 function normalizeProduct(product: any): GoogleSheetProduct {
@@ -33,12 +34,23 @@ function formatIranianRial(price: number): string {
 }
 
 export default function ProductsPage() {
+	// Get user information from Clerk
+	const {isSignedIn, user, isLoaded} = useUser();
+
 	const [products, setProducts] = useState<GoogleSheetProduct[]>([]);
 	const [cart, setCart] = useState<CartItem[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
 	const [error, setError] = useState<string | null>(null);
 	const [sheetNames, setSheetNames] = useState<string[]>([]);
 	const [currentSheet, setCurrentSheet] = useState<string>("");
+	const [phoneNumber, setPhoneNumber] = useState<string>("");
+	const [phoneNumberError, setPhoneNumberError] = useState<string | null>(null);
+
+	// Validation function for Persian mobile format
+	const validatePhoneNumber = (number: string): boolean => {
+		const persianMobileRegex = /^09\d{9}$/;
+		return persianMobileRegex.test(number);
+	};
 
 	// State to track data source (Supabase or Google Sheets)
 	const [dataSource, setDataSource] = useState<string>("loading");
@@ -240,17 +252,28 @@ export default function ProductsPage() {
 			return;
 		}
 
+		// Validate phone number
+		if (!validatePhoneNumber(phoneNumber)) {
+			setPhoneNumberError("Please enter a valid Persian mobile number (09XXXXXXXXX)");
+			return;
+		}
+
 		try {
 			// Calculate total
 			const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-			// Send order to Telegram
+			// Send order to Telegram with phone number and email
 			const response = await fetch("/api/telegram", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
-				body: JSON.stringify({cart, total}),
+				body: JSON.stringify({
+					cart,
+					total,
+					phoneNumber,
+					email: isSignedIn ? user.emailAddresses[0].emailAddress : "Not signed in",
+				}),
 			});
 
 			const result = await response.json();
@@ -414,9 +437,20 @@ export default function ProductsPage() {
 								Total: {formatIranianRial(cart.reduce((total, item) => total + item.price * item.quantity, 0))}{" "}
 								﷼
 							</p>
-							<Button onClick={submitOrder} className='mt-4'>
-								Submit Order
-							</Button>
+							<div className='mt-4 flex items-center gap-2'>
+								<Input
+									type='text'
+									placeholder='Phone Number (09XXXXXXXXX)'
+									value={phoneNumber}
+									onChange={(e) => {
+										setPhoneNumber(e.target.value);
+										setPhoneNumberError(null);
+									}}
+									className='max-w-xs'
+								/>
+								<Button onClick={submitOrder}>Submit Order</Button>
+							</div>
+							{phoneNumberError && <p className='text-red-500 text-sm mt-1'>{phoneNumberError}</p>}
 						</div>
 					</>
 				)}

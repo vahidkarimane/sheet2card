@@ -2,10 +2,10 @@ import {NextResponse} from "next/server";
 
 export async function POST(request: Request) {
 	try {
-		const {cart, total} = await request.json();
+		const {cart, total, phoneNumber, email} = await request.json();
 
 		// Format the message
-		const message = formatOrderMessage(cart, total);
+		const message = formatOrderMessage(cart, total, phoneNumber, email);
 
 		// Send to Telegram
 		const result = await sendTelegramMessage(message);
@@ -17,10 +17,13 @@ export async function POST(request: Request) {
 	}
 }
 
-function formatOrderMessage(cart: any[], total: number) {
+function formatOrderMessage(cart: any[], total: number, phoneNumber: string, email: string) {
 	const timestamp = new Date().toLocaleString();
 
 	let message = `🛒 *NEW ORDER* (${timestamp})\n\n`;
+	message += `*Customer Information:*\n`;
+	message += `📧 Email: ${email}\n`;
+	message += `📱 Phone: ${phoneNumber}\n\n`;
 	message += `*Order Summary:* ${cart.length} items\n\n`;
 
 	cart.forEach((item, index) => {
