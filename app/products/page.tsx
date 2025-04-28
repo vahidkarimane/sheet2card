@@ -1,15 +1,18 @@
 "use client";
 
 import {useState, useEffect} from "react";
-import {Tabs, TabsList, TabsTrigger} from "@/components/ui/tabs";
-import {Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle} from "@/components/ui/sheet";
+import {useUser} from "@clerk/nextjs";
+import {Product as GoogleSheetProduct} from "@/lib/googleSheets";
 import {Button} from "@/components/ui/button";
 import {Card} from "@/components/ui/card";
 import {Input} from "@/components/ui/input";
-import {useUser} from "@clerk/nextjs";
-import {Product as GoogleSheetProduct} from "@/lib/googleSheets";
+import {Tabs, TabsList, TabsTrigger} from "@/components/ui/tabs";
+import {Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle} from "@/components/ui/sheet";
 
-// Util ----------------------------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
+// 🔧 Helpers & Types
+// ────────────────────────────────────────────────────────────────────────────────
+
 function normalizeProduct(product: any): GoogleSheetProduct {
 	return {
 		id: product.id,
@@ -30,152 +33,158 @@ interface CartItem extends GoogleSheetProduct {
 
 const formatIranianRial = (price: number) => price.toLocaleString();
 
-//----------------------------------------------------------------------------------------
+// ⏰ 5‑minute cache
+const CACHE_MS = 5 * 60 * 1_000;
+
+// ────────────────────────────────────────────────────────────────────────────────
+// 📦 Component
+// ────────────────────────────────────────────────────────────────────────────────
 export default function ProductsPage() {
-	// Auth -------------------------------------------------------------------------------
 	const {isSignedIn, user} = useUser();
 
-	// State ------------------------------------------------------------------------------
 	const [products, setProducts] = useState<GoogleSheetProduct[]>([]);
-	const [cart, setCart] = useState<CartItem[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
 	const [sheetNames, setSheetNames] = useState<string[]>([]);
 	const [currentSheet, setCurrentSheet] = useState<string>("");
+
+	const [cart, setCart] = useState<CartItem[]>([]);
+	const [isSubmitting, setIsSubmitting] = useState(false);
+
 	const [phoneNumber, setPhoneNumber] = useState("");
 	const [phoneNumberError, setPhoneNumberError] = useState<string | null>(null);
-	const [dataSource, setDataSource] = useState("loading");
 
-	// Cache ------------------------------------------------------------------------------
-	interface CachedProducts {
+	const validatePhone = (num: string) => /^09\d{9}$/.test(num);
+
+	interface Cached {
 		products: GoogleSheetProduct[];
-		timestamp: number;
+		ts: number;
 	}
-	const CACHE_EXPIRATION_TIME = 5 * 60 * 1000;
-	const [productsCache, setProductsCache] = useState<Record<string, CachedProducts>>({});
+	const [cache, setCache] = useState<Record<string, Cached>>({});
 
-	const validatePhoneNumber = (number: string) => /^09\d{9}$/.test(number);
-	const isCacheExpired = (ts: number) => Date.now() - ts > CACHE_EXPIRATION_TIME;
-
-	// Fetch ------------------------------------------------------------------------------
-	const fetchProducts = async (sheet?: string) => {
-		try {
-			const category = sheet || sheetNames[0] || "";
-			if (category && productsCache[category] && !isCacheExpired(productsCache[category].timestamp)) {
-				setProducts(productsCache[category].products);
-				setCurrentSheet(category);
-				setLoading(false);
-				return;
-			}
-			setLoading(true);
-			const url = sheet ? `/api/products-supabase?category=${encodeURIComponent(sheet)}` : "/api/products-supabase";
-			const res = await fetch(url);
-			if (!res.ok) throw new Error("Network");
-			const data = await res.json();
-			const normalized = data.products.map(normalizeProduct);
-			setProducts(normalized);
-			setSheetNames(data.sheetNames || []);
-			setCurrentSheet(data.currentSheet || "");
-			setDataSource(data.source || "supabase");
-			setProductsCache((prev) => ({
-				...prev,
-				[data.currentSheet]: {products: normalized, timestamp: Date.now()},
-			}));
-			setError(null);
-		} catch (e) {
-			console.error(e);
-			setError("Failed to load products");
-		} finally {
-			setLoading(false);
-		}
+	const fromCache = (sheet: string) => {
+		const c = cache[sheet];
+		if (!c) return null;
+		return Date.now() - c.ts < CACHE_MS ? c.products : null;
 	};
 
+	// ───────────────────── fetch products
+	const fetchProducts = async (sheet?: string) => {
+		const cat = sheet || sheetNames[0] || "";
+		// try cache first
+		const cached = fromCache(cat);
+		if (cached) {
+			setProducts(cached);
+			setCurrentSheet(cat);
+			return;
+		}
+
+		const url = sheet ? `/api/products-supabase?category=${encodeURIComponent(sheet)}` : "/api/products-supabase";
+		const res = await fetch(url);
+		if (!res.ok) throw new Error("network");
+		const data = await res.json();
+		const normalised = data.products.map(normalizeProduct);
+
+		setProducts(normalised);
+		setSheetNames(data.sheetNames ?? []);
+		setCurrentSheet(data.currentSheet ?? "");
+		setCache((prev) => ({...prev, [data.currentSheet]: {products: normalised, ts: Date.now()}}));
+	};
+
+	// initial load
 	useEffect(() => {
-		fetchProducts();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
+		fetchProducts().catch(console.error);
 	}, []);
 
-	// Cart -------------------------------------------------------------------------------
+	// ───────────────────── cart helpers
 	const addToCart = (product: GoogleSheetProduct, qty: number) => {
-		if (!qty || qty < 1) return;
-		setCart((prev) => {
-			const exists = prev.find((i) => i.id === product.id);
-			return exists
-				? prev.map((i) => (i.id === product.id ? {...i, quantity: i.quantity + qty} : i))
-				: [...prev, {...product, quantity: qty}];
+		if (!qty) return;
+		setCart((old) => {
+			const found = old.find((i) => i.id === product.id);
+			if (found) return old.map((i) => (i.id === product.id ? {...i, quantity: i.quantity + qty} : i));
+			return [...old, {...product, quantity: qty}];
 		});
 	};
 
+	const cartTotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+
+	// ───────────────────── submit order
 	const submitOrder = async () => {
-		if (!validatePhoneNumber(phoneNumber)) return setPhoneNumberError("Enter a valid Persian mobile (09XXXXXXXXX)");
-		if (cart.length === 0) return alert("Cart empty");
+		if (cart.length === 0) return;
+
+		if (!validatePhone(phoneNumber)) {
+			setPhoneNumberError("Enter Persian mobile like 09XXXXXXXXX");
+			return;
+		}
+
+		setIsSubmitting(true);
 		try {
-			const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
 			const res = await fetch("/api/telegram", {
 				method: "POST",
 				headers: {"Content-Type": "application/json"},
 				body: JSON.stringify({
 					cart,
-					total,
+					total: cartTotal,
 					phoneNumber,
-					email: isSignedIn ? user.emailAddresses[0].emailAddress : "anonymous",
+					email: isSignedIn ? user.emailAddresses[0].emailAddress : "Not signed in",
 				}),
 			});
-			const r = await res.json();
-			if (r.success) {
-				alert("Order submitted 👍🏻");
+			const {success} = await res.json();
+			if (success) {
+				alert("Order submitted successfully!");
 				setCart([]);
 				setPhoneNumber("");
 			} else {
-				alert("Order sent but notification failed");
+				alert("Order submitted but notification failed.");
 			}
 		} catch (e) {
-			alert("Order failed, try again");
+			console.error(e);
+			alert("Error submitting order");
+		} finally {
+			setIsSubmitting(false);
 		}
 	};
 
-	// UI ---------------------------------------------------------------------------------
-	if (loading) return <p className='text-center py-20'>Loading…</p>;
-	if (error) return <p className='text-center py-20 text-red-500'>{error}</p>;
-
+	// ───────────────────── UI
 	return (
-		<div className='mx-auto w-full max-w-screen-xl px-4 pb-32'>
-			{/* Sticky header */}
-			<div className='sticky top-0 z-30 flex items-center justify-between bg-white/80 backdrop-blur py-2'>
-				<h1 className='text-lg font-bold md:text-2xl'>Products</h1>
+		<div className='container mx-auto p-4'>
+			{/* Top bar */}
+			<div className='flex justify-between items-center mb-4'>
+				<h1 className='text-2xl font-bold'>Products</h1>
+				{/* Cart sheet trigger */}
 				<Sheet>
 					<SheetTrigger asChild>
-						<Button variant='outline' size='sm' className='relative'>
+						<Button className='transition-transform duration-200 hover:scale-105 active:scale-95 relative'>
 							سبد خرید
 							{cart.length > 0 && (
-								<span className='absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white'>
-									{cart.reduce((s, i) => s + i.quantity, 0)}
+								<span className='ml-2 rounded-full bg-red-600 text-white w-6 h-6 flex items-center justify-center text-xs'>
+									{cart.length}
 								</span>
 							)}
 						</Button>
 					</SheetTrigger>
-					<SheetContent side='bottom' className='max-h-[80vh] overflow-y-auto p-4'>
+					<SheetContent side='bottom' className='sm:w-96 p-5'>
 						<SheetHeader>
-							<SheetTitle>Your Cart</SheetTitle>
+							<SheetTitle>Shopping Cart</SheetTitle>
 						</SheetHeader>
 						{cart.length === 0 ? (
-							<p className='py-6 text-center text-sm text-gray-500'>Your cart is empty</p>
+							<p className='mt-4 text-center'>Cart is empty</p>
 						) : (
-							<>
-								<ul className='space-y-2 py-4'>
-									{cart.map((item) => (
-										<li key={item.id} className='flex justify-between text-sm'>
-											<span>
-												{item.name} × {item.quantity}
-											</span>
-											<span>{formatIranianRial(item.price * item.quantity)} ﷼</span>
-										</li>
-									))}
-								</ul>
-								<p className='mb-4 text-right font-semibold'>
-									Total: {formatIranianRial(cart.reduce((t, i) => t + i.price * i.quantity, 0))} ﷼
-								</p>
-								<div className='flex items-center gap-2'>
+							<div className='mt-4 space-y-2'>
+								{cart.map((i) => (
+									<div key={i.id} className='flex justify-between text-sm'>
+										<span>
+											{i.name} × {i.quantity}
+										</span>
+										<span>{formatIranianRial(i.price * i.quantity)} ﷼</span>
+									</div>
+								))}
+								<div className='font-semibold flex justify-between border-t pt-2 mt-2'>
+									<span>Total</span>
+									<span>{formatIranianRial(cartTotal)} ﷼</span>
+								</div>
+
+								{/* Phone & submit */}
+								<div className='mt-4 flex flex-col gap-2'>
+									شماره تماس
 									<Input
 										placeholder='09XXXXXXXXX'
 										value={phoneNumber}
@@ -184,67 +193,69 @@ export default function ProductsPage() {
 											setPhoneNumberError(null);
 										}}
 									/>
-									<Button onClick={submitOrder}>Submit</Button>
+									{phoneNumberError && <p className='text-red-500 text-xs'>{phoneNumberError}</p>}
+									<Button
+										onClick={submitOrder}
+										disabled={cart.length === 0 || isSubmitting}
+										className={`transition-transform duration-200 hover:scale-105 active:scale-95 ${
+											cart.length === 0 || isSubmitting ? "opacity-50 cursor-not-allowed" : ""
+										}`}
+									>
+										{isSubmitting ? "Submitting…" : " ثبت سفارش"}
+									</Button>
 								</div>
-								{phoneNumberError && <p className='mt-1 text-sm text-red-500'>{phoneNumberError}</p>}
-							</>
+							</div>
 						)}
 					</SheetContent>
 				</Sheet>
 			</div>
 
 			{/* Category tabs */}
-			{sheetNames.length > 0 && (
-				<Tabs value={currentSheet} onValueChange={(v) => fetchProducts(v)} className='w-full'>
-					<TabsList className='no-scrollbar mt-2 flex w-full overflow-x-auto'>
-						{/* no-scrollbar is a custom util */}
-						{sheetNames.map((s) => (
-							<TabsTrigger
-								key={s}
-								value={s}
-								className='flex-none whitespace-nowrap px-4 py-2 text-sm md:text-base'
-							>
-								{s}
-							</TabsTrigger>
-						))}
-					</TabsList>
-				</Tabs>
-			)}
+			<Tabs defaultValue={currentSheet} value={currentSheet} onValueChange={fetchProducts}>
+				<TabsList className='overflow-x-auto whitespace-nowrap'>
+					{sheetNames.map((s) => (
+						<TabsTrigger key={s} value={s} className='px-4 py-2'>
+							{s}
+						</TabsTrigger>
+					))}
+				</TabsList>
+			</Tabs>
 
-			{/* Product grid */}
-			<div className='mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+			{/* Products grid */}
+			<div className='mt-6 grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4'>
 				{products.map((p) => (
-					<Card key={p.id} className='flex flex-col'>
+					<Card key={p.id} className='p-4 flex flex-col'>
 						{p.imageUrl1 && (
-							<img src={p.imageUrl1} alt={p.name} className='aspect-square w-full rounded-t-lg object-cover' />
+							<img src={p.imageUrl1} alt={p.name} className='w-full aspect-square object-cover rounded mb-4' />
 						)}
-						<div className='flex flex-1 flex-col p-4'>
-							<h2 className='text-base font-semibold md:text-lg'>{p.name}</h2>
-							<p className='mt-1 line-clamp-2 text-sm text-gray-500'>{p.description}</p>
-							<div className='mt-2 flex items-center gap-2'>
-								{p.originalPrice > p.price && (
-									<span className='text-sm text-gray-400 line-through'>
+						<h2 className='font-semibold text-lg'>{p.name}</h2>
+						<p className='text-sm text-muted-foreground line-clamp-2 mb-2'>{p.description}</p>
+						<div className='mt-auto'>
+							{p.originalPrice > p.price ? (
+								<div className='flex items-center gap-2 text-sm'>
+									<span className='line-through text-muted-foreground'>
 										﷼ {formatIranianRial(p.originalPrice)}
 									</span>
-								)}
-								<span className='text-lg font-bold'>﷼ {formatIranianRial(p.price)}</span>
-							</div>
+									<span className='font-bold text-red-600'>﷼ {formatIranianRial(p.price)}</span>
+								</div>
+							) : (
+								<p className='font-bold text-sm'>﷼ {formatIranianRial(p.price)}</p>
+							)}
 							<p
-								className={`mt-1 text-xs ${
+								className={`text-xs mt-1 ${
 									p.stockStatus === "In Stock" ? "text-green-600" : "text-orange-500"
 								}`}
 							>
 								{p.stockStatus}
 							</p>
-							{/* Add to cart */}
-							<div className='mt-auto flex items-end gap-2 pt-4'>
-								<Input type='number' min={1} defaultValue={1} className='h-9 w-20' id={`qty-${p.id}`} />
+							<div className='mt-3 flex items-center gap-2'>
+								<Input type='number' min={1} defaultValue={1} id={`qty-${p.id}`} className='w-16 h-9' />
 								<Button
-									size='sm'
 									onClick={() => {
 										const qty = parseInt((document.getElementById(`qty-${p.id}`) as HTMLInputElement).value);
 										addToCart(p, qty);
 									}}
+									className='transition-transform duration-200 hover:scale-105 active:scale-95'
 								>
 									Add
 								</Button>
@@ -256,14 +267,3 @@ export default function ProductsPage() {
 		</div>
 	);
 }
-
-// Tailwind utility for hiding scrollbar (globals.css)
-/*
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-*/
