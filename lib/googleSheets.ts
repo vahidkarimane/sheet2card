@@ -1,5 +1,7 @@
 import {google} from "googleapis";
 import path from "path";
+import fs from "fs";
+import {GoogleAuth} from "google-auth-library";
 
 // Define the interface for our application's Product structure
 export interface Product {
@@ -19,10 +21,24 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1iIbGhOmpyNSLK1WRZPK6dql0P5hg6g
 const DEFAULT_SHEET = "fillerProducts";
 
 // Create auth client using the service account credentials
-const auth = new google.auth.GoogleAuth({
-	keyFile: path.join(process.cwd(), "google.json"),
-	scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-});
+let auth: GoogleAuth;
+
+// Check if we have the credentials as an environment variable (for production/Vercel)
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+	// Decode the base64 encoded JSON
+	const credentials = JSON.parse(Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON, "base64").toString());
+
+	auth = new google.auth.GoogleAuth({
+		credentials,
+		scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+	});
+} else {
+	// Fallback to file-based credentials (for local development)
+	auth = new google.auth.GoogleAuth({
+		keyFile: path.join(process.cwd(), "google.json"),
+		scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+	});
+}
 
 /**
  * Convert a row from Google Sheets to our Product interface
